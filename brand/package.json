@@ -1,0 +1,35 @@
+{
+  "name": "@local/nervdog-brand",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NERVDOG Harness brand: husky mark in the sidebar and the blank-session headline, and the nervdog.com footer wordmark",
+  "icon": "./assets/mark.png",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["index.js", "lib", "cordis.patch.yml", "assets/mark.png"],
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  },
+  "engines": {
+    "dsh": "^0.2.2-rc.4"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    },
+    "manifestVersion": 1
+  }
+}

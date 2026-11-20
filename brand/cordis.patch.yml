@@ -1,0 +1,4 @@
+# NERVDOG Harness brand layer: one row whose browser half fills the sidebar brand slots.
+- insert:
+    - id: nervdog-brand
+      name: '@local/nervdog-brand'
