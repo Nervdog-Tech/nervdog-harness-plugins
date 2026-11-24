@@ -130,16 +130,76 @@ function extractEditedPaths(toolName, args, baseCwd) {
   return out
 }
 
+function resolveSimpleShellVars(command) {
+  const vars = new Map()
+  if (typeof command !== 'string') return vars
+  // PowerShell: $repo = '...' or $repo = "..."
+  for (const m of command.matchAll(/\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:'([^']*)'|"([^"]*)"|([^\s;#|&]+))/g)) {
+    vars.set(m[1].toLowerCase(), m[2] ?? m[3] ?? m[4] ?? '')
+  }
+  // POSIX sh/bash: repo='...' or repo="..." or export repo=...
+  for (const m of command.matchAll(/(?:^|[;\n&|]\s*)(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(?:'([^']*)'|"([^"]*)"|([^\s;#|&]+))/g)) {
+    vars.set(m[1], m[2] ?? m[3] ?? m[4] ?? '')
+  }
+  return vars
+}
+
+function expandSimpleVar(raw, vars) {
+  if (!raw) return null
+  // PowerShell $var or ${var}
+  const ps = raw.match(/^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$/)
+  if (ps) {
+    return vars.get(ps[1]) ?? vars.get(ps[1].toLowerCase()) ?? null
+  }
+  // Unexpanded variable/expression token: never climb ancestor into another repo
+  if (/[$%`]/.test(raw)) return null
+  return raw
+}
+
 function extractGitPushWorkdir(command, fallbackCwd) {
   if (typeof command !== 'string') return fallbackCwd
-  // Match `git -C "path" ... push` or `git -C path ... push`
-  const match = command.match(/\bgit\s+-C\s+(?:"([^"]+)"|'([^']+)'|(\S+))/i)
+  const vars = resolveSimpleShellVars(command)
+
+  // Find the segment containing `git ... push`
+  const segments = command.split(/[\r\n;&|]+/)
+  const pushSegment = segments.find(seg => /\bgit\b[^|;&\r\n]*\bpush\b/i.test(seg)) || command
+
+  // Match `git -C "path" ... push` or `git -C $var ... push`
+  const match = pushSegment.match(/\bgit\s+-C\s+(?:"([^"]+)"|'([^']+)'|(\S+))/i)
   if (match) {
-    const target = match[1] || match[2] || match[3]
-    if (target) {
-      return path.isAbsolute(target) ? path.normalize(target) : path.resolve(fallbackCwd || process.cwd(), target)
+    const rawTarget = match[1] || match[2] || match[3]
+    const expanded = expandSimpleVar(rawTarget, vars)
+    if (!expanded) return null
+    const resolved = path.isAbsolute(expanded)
+      ? path.normalize(expanded)
+      : path.resolve(fallbackCwd || process.cwd(), expanded)
+    try {
+      return fs.existsSync(resolved) ? resolved : null
+    } catch {
+      return null
     }
   }
+
+  // If the command changed directories earlier (`cd <dir>` / `Set-Location <dir>`), avoid misattributing to fallbackCwd
+  if (/(?:^|[\r\n;&|]\s*)(?:cd|chdir|set-location|sl|pushd|push-location)\s+/i.test(command)) {
+    const cdMatches = [...command.matchAll(/(?:^|[\r\n;&|]\s*)(?:cd|chdir|set-location|sl|pushd|push-location)\s+(?:-Path\s+)?(?:"([^"]+)"|'([^']+)'|([^\s;#|&]+))/gi)]
+    const lastCd = cdMatches.at(-1)
+    if (lastCd) {
+      const rawDir = lastCd[1] || lastCd[2] || lastCd[3]
+      const expanded = expandSimpleVar(rawDir, vars)
+      if (!expanded) return null
+      const resolved = path.isAbsolute(expanded)
+        ? path.normalize(expanded)
+        : path.resolve(fallbackCwd || process.cwd(), expanded)
+      try {
+        return fs.existsSync(resolved) ? resolved : null
+      } catch {
+        return null
+      }
+    }
+    return null
+  }
+
   return fallbackCwd
 }
 
@@ -245,6 +305,7 @@ export function apply(ctx, rawConfig) {
         lastCommitFingerprint: null,
         ciSteersThisTurn: 0,
         pushed: null, // { repoRoot, sha, pushedAt, blocks }
+        pendingPushChecks: new Set(),
       }
       stateByRoot.set(rootSessionId, state)
     }
@@ -381,7 +442,13 @@ export function apply(ctx, rawConfig) {
           ? (path.isAbsolute(argWorkdir) ? path.normalize(argWorkdir) : path.resolve(sessionCwd, argWorkdir))
           : sessionCwd
         const pushWorkdir = extractGitPushWorkdir(command, baseWorkdir)
-        void recordPushIfApplicable(rootId, pushWorkdir)
+        if (pushWorkdir) {
+          const state = getOrCreateState(rootId)
+          const p = recordPushIfApplicable(rootId, pushWorkdir).finally(() => {
+            state.pendingPushChecks.delete(p)
+          })
+          state.pendingPushChecks.add(p)
+        }
       }
     }
   })
@@ -483,6 +550,10 @@ export function apply(ctx, rawConfig) {
     }
 
     // 2. Guard pushed commit Continuous CI (only for repos with .claude/scripts/ci-wait.js)
+    if (cfg.ciGuard && state.pendingPushChecks.size > 0) {
+      await Promise.allSettled([...state.pendingPushChecks])
+      if (signal?.aborted) return
+    }
     if (cfg.ciGuard && state.pushed && state.pushed.blocks < cfg.maxCiSteersPerPush && state.ciSteersThisTurn < cfg.maxCiSteersPerPush) {
       const pushed = state.pushed
       const ci = loadCiWait(pushed.repoRoot)
