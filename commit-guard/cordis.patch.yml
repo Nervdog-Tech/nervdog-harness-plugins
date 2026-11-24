@@ -1,0 +1,10 @@
+# Guard root sessions from ending a turn with uncommitted session edits or unverified pushed CI.
+- insert:
+    - id: nervdog-commit-guard
+      name: '@local/nervdog-commit-guard'
+      config:
+        commitGuard: true
+        ciGuard: true
+        maxCommitSteersPerTurn: 2
+        maxCiSteersPerPush: 2
+        gitTimeoutMs: 5000

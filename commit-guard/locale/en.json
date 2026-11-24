@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Commit guard",
+    "description": "Before a root session ends a turn, checks git repositories for files edited in this session (including by its subagents) that remain uncommitted, and steers the agent once per unchanged dirty file set so it commits or explicitly reports them as uncommitted. When the repository provides .claude/scripts/ci-wait.js and the session ran git push, also checks that the pushed commit's Continuous pipeline is green. Skips subagents and files outside git repositories. Disabling the plugin turns off both turn-end checks."
+  }
+}

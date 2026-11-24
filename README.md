@@ -5,6 +5,7 @@
 | 插件 | 包名 | 做什么 |
 |---|---|---|
 | [brand](brand/) | `@local/nervdog-brand` | 侧边栏左上角换成哈士奇 + NERVDOG 字标 + Harness；首页标题前的鲸鱼换成哈士奇。也放着桌面版 exe / 托盘 / 关于面板用的图标（`brand/icons/`，由 nervdog-harness 的 `desktop/brand-exe.mjs` 取用） |
+| [commit-guard](commit-guard/) | `@local/nervdog-commit-guard` | 回合结束前检查本会话（含子代理）改过但尚未 commit 的 git 文件并自动回合内转向提醒；仓库带 `.claude/scripts/ci-wait.js` 且本会话执行过 `git push` 时，一并检查 Continuous 流水线是否变绿 |
 
 ## 安装
 
@@ -13,7 +14,21 @@
 - 网页版：`dsh plugin --profile web add link:<绝对路径>/nervdog-harness-plugins/brand`
 - 桌面版：插件 → 添加插件 → 填同一个绝对路径 → 安装 → 立即启用（命令行不允许管理 desktop 配置）
 
-卸载：`dsh plugin --profile web remove @local/nervdog-brand`，桌面版在插件页卸载。
+卸载：`dsh plugin --profile web remove @local/nervdog-brand`（或 `@local/nervdog-commit-guard`），桌面版在插件页卸载。
+
+## commit-guard
+
+纯 Host 端插件，无第三方依赖、无需构建：
+
+```
+commit-guard/
+  package.json  cordis.patch.yml  index.js   清单、默认配置与 Host 逻辑
+  locale/en.json  locale/zh.json             插件管理页中英文标题与说明
+  icon.svg  README.md                        图标与详情文档
+```
+
+- 监听 `tools/result` 与 `agent/turn-stopping`；仅检查本会话动过且在 `git status` 中仍为脏/未跟踪的文件，不会误触共用工作区里其他会话的未提交改动。
+- 同一组未提交文件在单回合内最多转向一次（防死循环），子代理回合与 git 仓库外文件自动跳过。
 
 ## brand
 
